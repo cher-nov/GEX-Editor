@@ -137,7 +137,7 @@ begin
   WriteLn( 'Usage:' );
   WriteLn( '  exe <project.ged|package.gex> [output]' );
   WriteLn();
-  WriteLn( 'exe project.ged' );
+  WriteLn( 'exe [folder_name/]project.ged' );
   WriteLn( '  - compose the GEX extension package using .ged / .gmp project' );
   WriteLn( '    (binary file formats of Extension Maker 1.2 / 1.01, respectively)' );
   WriteLn( 'exe package.gex' );
@@ -152,11 +152,14 @@ end;
 
 procedure TApplication.ActionCompose();
 var
-  ProjectFileName, PackageFileName : String;
+  ProjectFileName, PackageFileName, PackageFolder : String;
   ProjectFile : TFileStream;
   PackageFile : TFileStream;
 begin
   ProjectFileName := Params[1];
+  PackageFolder := ExtractFileDir( ProjectFileName );
+  if PackageFolder <> '' then
+    ProjectFileName := ExtractFileName( ProjectFileName );
 
   PackageFileName := Params[2];
   if PackageFileName = '' then
@@ -167,12 +170,16 @@ begin
   PackageFile := nil;
 
   try
+    Report( 'preparing', PackageFileName );
+    PackageFile := TFileStream.Create( PackageFileName, fmCreate );
+    if PackageFolder <> '' then
+      SetCurrentDir( PackageFolder );
+
     Report( 'reading', ProjectFileName );
     ProjectFile := TFileStream.Create( ProjectFileName, fmOpenRead );
     fExtension.Package.Prototype.LoadFromStream( ProjectFile );
 
     Report( 'composing', PackageFileName );
-    PackageFile := TFileStream.Create( PackageFileName, fmCreate );
     fExtension.SaveToStream( PackageFile, @CB_PrepareReadingStreams, True, clMax );
 
   finally
@@ -184,27 +191,27 @@ end;
 
 procedure TApplication.ActionDecompose();
 var
-  PackageFileName, ProjectFileName, OutputFolder : String;
+  PackageFileName, ProjectFileName, ProjectFolder : String;
   PackageFile : TFileStream;
   ProjectFile : TFileStream;
 begin
   PackageFileName := Params[1];
 
-  OutputFolder := Params[2];
-  if OutputFolder = '' then
-    OutputFolder := ExtractFileNameWithoutExt( PackageFileName );
+  ProjectFolder := Params[2];
+  if ProjectFolder = '' then
+    ProjectFolder := ExtractFileNameWithoutExt( PackageFileName );
 
-  ProjectFileName := MakeSafeFileName( OutputFolder+'.ged' );
-  OutputFolder := MakeSafeFolderName( OutputFolder );
+  ProjectFileName := MakeSafeFileName( ProjectFolder+'.ged' );
+  ProjectFolder := MakeSafeFolderName( ProjectFolder );
 
   PackageFile := nil;
   ProjectFile := nil;
 
   try
-    Report( 'preparing', './'+OutputFolder+'/' );
+    Report( 'preparing', './'+ProjectFolder+'/' );
     PackageFile := TFileStream.Create( PackageFileName, fmOpenRead );
-    CreateDir( OutputFolder );
-    SetCurrentDir( OutputFolder );
+    CreateDir( ProjectFolder );
+    SetCurrentDir( ProjectFolder );
 
     Report( 'decomposing', PackageFileName );
     fExtension.LoadFromStream( PackageFile, @CB_PrepareWritingStreams );
