@@ -32,6 +32,11 @@ type
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
+procedure Report( aStage, aName: String ); inline;
+begin
+  WriteLn( aStage, ' ''', aName, ''' ...' );
+end;
+
 // TODO: Sanitize Windows special chars and identifiers like PRN from the filename.
 // https://forum.lazarus.freepascal.org/index.php?topic=16862.0
 function MakeSafeFileName( aName: String ): String;
@@ -64,11 +69,13 @@ end;
 function CB_PrepareWritingStreams( aName: String; var aSource: String ): TStream;
 begin
   aSource := MakeSafeFilename( aName );
+  Report( 'saving', aSource );
   Result := TFileStream.Create( aSource, fmCreate );
 end;
 
 function CB_PrepareReadingStreams( aName: String; var aSource: String ): TStream;
 begin
+  Report( 'loading', aSource );
   Result := TFileStream.Create( aSource, fmOpenRead );
 end;
 
@@ -97,7 +104,14 @@ end;
 
 procedure TApplication.DoRun();
 begin
-  WriteLn( Title, ' - Written by Dmitry D. Chernov, 2020', LineEnding );
+  WriteLn( Title, ' - Written by Dmitry D. Chernov, 2016-2020' );
+  WriteLn(
+    '; ' + {$I %DATE%} + ' ' + {$I %TIME%}
+    + ' ; fpc ' + {$I %FPCVERSION%}
+    + ' ; cpu ' + {$I %FPCTARGETCPU%}
+    + ' ; sys ' + {$I %FPCTARGETOS%}
+    + LineEnding
+  );
 
   if ParamCount = 0 then begin
     ActionPrintUsage();
@@ -108,6 +122,8 @@ begin
     '.gex':
       ActionDecompose();
     end;
+
+    WriteLn( LineEnding, 'DONE OK' );
   end;
 
   // It's preferred to die from exceptions, so we don't bother about exitcodes.
@@ -151,9 +167,12 @@ begin
   PackageFile := nil;
 
   try
+    Report( 'reading', ProjectFileName );
     ProjectFile := TFileStream.Create( ProjectFileName, fmOpenRead );
-    PackageFile := TFileStream.Create( PackageFileName, fmCreate );
     fExtension.Package.Prototype.LoadFromStream( ProjectFile );
+
+    Report( 'composing', PackageFileName );
+    PackageFile := TFileStream.Create( PackageFileName, fmCreate );
     fExtension.SaveToStream( PackageFile, @CB_PrepareReadingStreams, True, clMax );
 
   finally
@@ -182,14 +201,16 @@ begin
   ProjectFile := nil;
 
   try
+    Report( 'preparing', './'+OutputFolder+'/' );
     PackageFile := TFileStream.Create( PackageFileName, fmOpenRead );
-
     CreateDir( OutputFolder );
     SetCurrentDir( OutputFolder );
 
-    ProjectFile := TFileStream.Create( ProjectFileName, fmCreate );
-
+    Report( 'decomposing', PackageFileName );
     fExtension.LoadFromStream( PackageFile, @CB_PrepareWritingStreams );
+
+    Report( 'writing', ProjectFileName );
+    ProjectFile := TFileStream.Create( ProjectFileName, fmCreate );
     fExtension.Package.Prototype.Editable := True;
     fExtension.Package.Prototype.SaveToStream( ProjectFile, False );
 
