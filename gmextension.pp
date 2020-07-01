@@ -1230,11 +1230,16 @@ begin
     if Assigned( cbStreamBuilder ) then begin
       // The compressed data of a help file is stored in the beginning of the data block.
       if fPackage.Prototype.HelpFile <> '' then begin
-        ContentFileName := ExtractFileNameWithoutExt( fPackage.Prototype.HelpFile );
+        ContentFileName := ExtractFileNameOnly( fPackage.Prototype.HelpFile );
         if ContentFileName = '' then
-          ContentFileName := fPackage.Prototype.Name;
-        fPackage.Prototype.HelpFile := AppendStream( ContentFileName, fPackage.Prototype.HelpFile,
-          cbStreamBuilder );
+          // TempFolder is the only filesystem-friendly name we can obtain here without sanitizing.
+          ContentFileName := fPackage.Prototype.TempFolder;
+
+        fPackage.Prototype.HelpFile := AppendStream(
+          ContentFileName + ExtractFileExt( fPackage.Prototype.HelpFile ),
+          fPackage.Prototype.HelpFile,
+          cbStreamBuilder
+        );
       end;
 
       for iContent in fPackage.Prototype.Contents do begin
