@@ -36,18 +36,18 @@ type
   strict protected
     fCipherTable : TGmKryptCipherTable;
     fKeySeed : LongInt;
-    fAdditiveCrypto : Boolean;
+    fAdditiveCipher : Boolean;
     fByteCounter : Int64;
   protected
     function GetPosition(): Int64; override;
     function GetSize(): Int64; override;
   public
     procedure AfterConstruction(); override;
-    function InitState( aKeySeed: LongInt; aAdditiveCrypto: Boolean ): Boolean; virtual;
-    function IsIdenticalCrypto(): Boolean; inline;
+    function InitState( aKeySeed: LongInt; aAdditiveCipher: Boolean ): Boolean; virtual;
+    function IsIdenticalCipher(): Boolean; inline;
     function Seek( const Offset: Int64; Origin: TSeekOrigin ): Int64; override;
     property KeySeed: LongInt read fKeySeed;
-    property AdditiveCipher: Boolean read fAdditiveCrypto;
+    property AdditiveCipher: Boolean read fAdditiveCipher;
     property ByteCounter: Int64 read fByteCounter;
   end;
 
@@ -58,7 +58,7 @@ type
 
   TGmKryptDecodeStream = class( TCustomGmKryptStream )
   public
-    function InitState( aKeySeed: LongInt; aAdditiveCrypto: Boolean ): Boolean; override;
+    function InitState( aKeySeed: LongInt; aAdditiveCipher: Boolean ): Boolean; override;
     function Read( var Buffer; Count: LongInt ): LongInt; override;
   end;
 
@@ -84,7 +84,7 @@ begin
   fKeySeed := cGmKryptIdentityKeySeed;
 end;
 
-function TCustomGmKryptStream.InitState( aKeySeed: LongInt; aAdditiveCrypto: Boolean ): Boolean;
+function TCustomGmKryptStream.InitState( aKeySeed: LongInt; aAdditiveCipher: Boolean ): Boolean;
 var
   a, b : Integer;
   swap : Byte;
@@ -93,9 +93,9 @@ begin
   fByteCounter := 0;  // note: the first byte is always unencrypted
 
   fKeySeed := aKeySeed;
-  fAdditiveCrypto := aAdditiveCrypto;
+  fAdditiveCipher := aAdditiveCipher;
 
-  Result := IsIdenticalCrypto();
+  Result := IsIdenticalCipher();
   if Result then exit;
 
   for i in Byte do
@@ -112,10 +112,10 @@ begin
   end;
 end;
 
-function TCustomGmKryptStream.IsIdenticalCrypto(): Boolean;
+function TCustomGmKryptStream.IsIdenticalCipher(): Boolean;
 begin
   Result := (fKeySeed - cGmKryptIdentityKeySeed) mod 250 = 0;  // check for identity keys
-  Result := Result and not fAdditiveCrypto;  // check for non-identity method
+  Result := Result and not fAdditiveCipher;  // check for non-identity method
 end;
 
 function TCustomGmKryptStream.Seek( const Offset: Int64; Origin: TSeekOrigin ): Int64;
@@ -132,7 +132,7 @@ begin
   end;
 
   NewCounterValue := fByteCounter - BasePosition + Offset;
-  if not IsIdenticalCrypto() and fAdditiveCrypto and (NewCounterValue < 0)then
+  if not IsIdenticalCipher() and fAdditiveCipher and (NewCounterValue < 0)then
     InvalidSeek();
 
   Result := fSource.Seek( Offset, Origin );
@@ -160,7 +160,7 @@ var
   code : Byte;
   i : LongInt;
 begin
-  if IsIdenticalCrypto() then begin
+  if IsIdenticalCipher() then begin
     SourceData := nil;
     OutputData := @Buffer;
   end else begin
@@ -176,7 +176,7 @@ begin
   
     for i := i to Count-1 do begin
       code := SourceData[i];
-      if fAdditiveCrypto then
+      if fAdditiveCipher then
         code := SizeInt(code + fByteCounter + i) and 255;
       SourceData[i] := fCipherTable[code];
     end;
@@ -194,7 +194,7 @@ end;
 // TGmKryptDecodeStream
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-function TGmKryptDecodeStream.InitState( aKeySeed: LongInt; aAdditiveCrypto: Boolean ): Boolean;
+function TGmKryptDecodeStream.InitState( aKeySeed: LongInt; aAdditiveCipher: Boolean ): Boolean;
 var
   DecodeTable : TGmKryptCipherTable;
   i : Integer;
@@ -215,7 +215,7 @@ var
 begin
   Result := fSource.Read( Buffer, Count );
   fByteCounter += Result;
-  if IsIdenticalCrypto() then exit;
+  if IsIdenticalCipher() then exit;
 
   // skip first byte as required
   if fByteCounter = Result then
@@ -226,7 +226,7 @@ begin
   TargetData := PByte(@Buffer);
   for i := i to Result-1 do begin
     code := fCipherTable[ TargetData[i] ];
-    if fAdditiveCrypto then
+    if fAdditiveCipher then
       code := SizeInt(code - fByteCounter - i) and 255;
     TargetData[i] := code;
   end;

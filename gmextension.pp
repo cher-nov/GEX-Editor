@@ -446,7 +446,7 @@ class function TGmExtObject.EnsureCryptoStream( aClass: TGmKryptStreamClass;
 begin
   if aStream is aClass then begin
     TStream(Result) := aStream;
-    CommonAssert( Result.IsIdenticalCrypto(), 'Stream is not set to an identical cipher state' );
+    CommonAssert( Result.IsIdenticalCipher(), 'Stream is not set to an identical cipher state' );
     aStream := nil;
   end else begin
     Result := aClass.Create( aStream );
