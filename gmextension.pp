@@ -48,6 +48,8 @@ type
     class procedure CommonAssert( aCondition: Boolean; const aMessage: String ); inline;
     class function EnsureCryptoStream( aClass: TGmKryptStreamClass;
       var aStream: TStream ): TCustomGmKryptStream; inline;
+  public
+    procedure Reset(); inline;
   end;
 
   // This is the abstract interface class for any extension data that can be read or written into
@@ -452,6 +454,17 @@ begin
   end;
 end;
 
+// Important design decision. To reset any non-essential data in the object, it should be enough
+// to call .BeforeDestruction() followed by .AfterConstruction(). Therefore, we use constructors
+// and destructors to initialize and release the essential data ONLY, e.g. the revision number of
+// a TGmExtEntry (otherwise in TGmExtEntry.LoadFromStream() its value would be erased on reset) or
+// the linked entry of a TGmExtContent.
+procedure TGmExtObject.Reset();
+begin
+  BeforeDestruction();
+  AfterConstruction();
+end;
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // TGmExtEntry
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -466,14 +479,7 @@ procedure TGmExtEntry.LoadFromStream( aStream: TStream );
 var
   KnownVersion : Boolean = True;
 begin
-  // Important design decision. To reset any non-essential data in the entry, it should be enough
-  // to call .BeforeDestruction() followed by .AfterConstruction(). Therefore, we use constructors
-  // and destructors to initialize and release the essential data ONLY, e.g. the revision number of
-  // a TGmExtEntry (otherwise we'll get wrong value here) or the linked entry of a TGmExtContent.
-
-  BeforeDestruction();
-  AfterConstruction();
-
+  Reset();
   fRevision := aStream.ReadGmInteger();
 
   try
