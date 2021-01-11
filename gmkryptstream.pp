@@ -35,20 +35,19 @@ type
   TCustomGmKryptStream = class( TOwnerStream )
   strict protected
     fCipherTable : TGmKryptCipherTable;
+    fBasePosition : Int64;
     fKeySeed : LongInt;
     fAdditiveCipher : Boolean;
-    fByteCounter : Int64;
   protected
     function GetPosition(): Int64; override;
     function GetSize(): Int64; override;
   public
     procedure AfterConstruction(); override;
-    function InitState( aKeySeed: LongInt; aAdditiveCipher: Boolean ): Boolean; virtual;
+    function SetState( aKeySeed: LongInt; aAdditiveCipher: Boolean ): Boolean; virtual;
     function IsIdenticalCipher(): Boolean; inline;
     function Seek( const Offset: Int64; Origin: TSeekOrigin ): Int64; override;
     property KeySeed: LongInt read fKeySeed;
     property AdditiveCipher: Boolean read fAdditiveCipher;
-    property ByteCounter: Int64 read fByteCounter;
   end;
 
   TGmKryptEncodeStream = class( TCustomGmKryptStream )
@@ -58,7 +57,7 @@ type
 
   TGmKryptDecodeStream = class( TCustomGmKryptStream )
   public
-    function InitState( aKeySeed: LongInt; aAdditiveCipher: Boolean ): Boolean; override;
+    function SetState( aKeySeed: LongInt; aAdditiveCipher: Boolean ): Boolean; override;
     function Read( var Buffer; Count: LongInt ): LongInt; override;
   end;
 
@@ -81,17 +80,16 @@ end;
 
 procedure TCustomGmKryptStream.AfterConstruction();
 begin
-  fKeySeed := cGmKryptIdentityKeySeed;
+  SetState( cGmKryptIdentityKeySeed, False );
 end;
 
-function TCustomGmKryptStream.InitState( aKeySeed: LongInt; aAdditiveCipher: Boolean ): Boolean;
+function TCustomGmKryptStream.SetState( aKeySeed: LongInt; aAdditiveCipher: Boolean ): Boolean;
 var
   a, b : Integer;
   swap : Byte;
   i, j : Integer;
 begin
-  fByteCounter := 0;  // note: the first byte is always unencrypted
-
+  fBasePosition := fSource.Position;  // note: the first byte is always unencrypted
   fKeySeed := aKeySeed;
   fAdditiveCipher := aAdditiveCipher;
 
@@ -120,34 +118,33 @@ end;
 
 function TCustomGmKryptStream.Seek( const Offset: Int64; Origin: TSeekOrigin ): Int64;
 var
-  BasePosition, NewCounterValue : Int64;
+  BaseShift : Int64;
 begin
-  Case Word(Origin) of
-    soFromBeginning:
-      BasePosition := fSource.Position;
-    soFromEnd:
-      BasePosition := fSource.Position - fSource.Size;
-    else  // soFromCurrent:
-      BasePosition := 0;
+  if not IsIdenticalCipher() then begin
+    case Word(Origin) of
+      soFromBeginning:
+        BaseShift := 0;
+      soFromEnd:
+        BaseShift := GetSize() - 1;
+      else  // soFromCurrent:
+        BaseShift := GetPosition();
+    end;
+
+    if Offset < -BaseShift then
+      InvalidSeek();
   end;
 
-  NewCounterValue := fByteCounter - BasePosition + Offset;
-  if not IsIdenticalCipher() and fAdditiveCipher and (NewCounterValue < 0)then
-    InvalidSeek();
-
   Result := fSource.Seek( Offset, Origin );
-  fByteCounter := NewCounterValue;
 end;
 
-// these overrides are provided to prevent Seek() invocation by default implementations
 function TCustomGmKryptStream.GetPosition(): Int64;
 begin
-  Result := fSource.Position;
+  Result := fSource.Position - fBasePosition;
 end;
 
 function TCustomGmKryptStream.GetSize(): Int64;
 begin
-  Result := fSource.Size;
+  Result := fSource.Size - fBasePosition;
 end;
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -169,7 +166,7 @@ begin
     OutputData := SourceData;
 
     // skip first byte as required
-    if fByteCounter = 0 then
+    if GetPosition() = 0 then
       i := 1
     else
       i := 0;
@@ -177,14 +174,13 @@ begin
     for i := i to Count-1 do begin
       code := SourceData[i];
       if fAdditiveCipher then
-        code := SizeInt(code + fByteCounter + i) and 255;
+        code := SizeInt(code + GetPosition() + i) and 255;
       SourceData[i] := fCipherTable[code];
     end;
   end;
 
   try
     Result := fSource.Write( OutputData^, Count );
-    fByteCounter += Result;
   finally
     FreeMemory( SourceData );
   end;
@@ -194,7 +190,7 @@ end;
 // TGmKryptDecodeStream
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-function TGmKryptDecodeStream.InitState( aKeySeed: LongInt; aAdditiveCipher: Boolean ): Boolean;
+function TGmKryptDecodeStream.SetState( aKeySeed: LongInt; aAdditiveCipher: Boolean ): Boolean;
 var
   DecodeTable : TGmKryptCipherTable;
   i : Integer;
@@ -214,11 +210,10 @@ var
   i : LongInt;
 begin
   Result := fSource.Read( Buffer, Count );
-  fByteCounter += Result;
   if IsIdenticalCipher() then exit;
 
   // skip first byte as required
-  if fByteCounter = Result then
+  if GetPosition() = Result then
     i := 1
   else
     i := 0;
@@ -227,7 +222,7 @@ begin
   for i := i to Result-1 do begin
     code := fCipherTable[ TargetData[i] ];
     if fAdditiveCipher then
-      code := SizeInt(code - fByteCounter - i) and 255;
+      code := SizeInt(code - GetPosition() - i) and 255;
     TargetData[i] := code;
   end;
 end;

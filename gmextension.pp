@@ -1043,7 +1043,7 @@ begin
 
   try
     fKeySeed := DecodeStream.ReadGmInteger();
-    DecodeStream.InitState( fKeySeed, False );
+    DecodeStream.SetState( fKeySeed, False );
     fPrototype.LoadFromStream( DecodeStream );
   finally
     aStream.Free();
@@ -1058,7 +1058,7 @@ begin
 
   try
     EncodeStream.WriteGmInteger( fKeySeed );
-    EncodeStream.InitState( fKeySeed, False );
+    EncodeStream.SetState( fKeySeed, False );
     fPrototype.SaveToStream( EncodeStream, aOptimize );
   finally
     aStream.Free();
@@ -1179,7 +1179,7 @@ begin
 
   try
     fKeySeed := DecodeStream.ReadGmInteger();
-    DecodeStream.InitState( fKeySeed, False );
+    DecodeStream.SetState( fKeySeed, False );
     ReadStreams( DecodeStream );
   finally
     aStream.Free();
@@ -1194,7 +1194,7 @@ begin
 
   try
     EncodeStream.WriteGmInteger( fKeySeed );
-    EncodeStream.InitState( fKeySeed, False );
+    EncodeStream.SetState( fKeySeed, False );
     WriteStreams( EncodeStream, aZlibLevel );
   finally
     aStream.Free();
