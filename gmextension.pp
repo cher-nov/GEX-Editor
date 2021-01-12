@@ -46,8 +46,7 @@ type
   TGmExtObject = class
   strict protected
     class procedure CommonAssert( aCondition: Boolean; const aMessage: String ); inline;
-    class function EnsureCryptoStream( aClass: TGmKryptStreamClass;
-      var aStream: TStream ): TCustomGmKryptStream; inline;
+    class function WrapStreamChain( var aStream: TStream ): TGmKryptStream; inline;
   public
     procedure Reset(); inline;
   end;
@@ -441,15 +440,13 @@ end;
 // with an identical state, read / write the key seed from / to it and then initialize the cipher.
 // This allows us to continue to use this stream to read / write the compressed data after
 // processing the entries.
-class function TGmExtObject.EnsureCryptoStream( aClass: TGmKryptStreamClass;
-  var aStream: TStream ): TCustomGmKryptStream;
+class function TGmExtObject.WrapStreamChain( var aStream: TStream ): TGmKryptStream;
 begin
-  if aStream is aClass then begin
-    TStream(Result) := aStream;
-    CommonAssert( Result.IsIdenticalCipher(), 'Stream is not set to an identical cipher state' );
+  if aStream is TGmKryptStream then begin
+    Result := TGmKryptStream( aStream );
     aStream := nil;
   end else begin
-    Result := aClass.Create( aStream );
+    Result := TGmKryptStream.Create( aStream );
     aStream := Result;
   end;
 end;
@@ -1037,14 +1034,14 @@ end;
 
 procedure TGmExtPackage.ReadEntityGEX( aStream: TStream );
 var
-  DecodeStream : TCustomGmKryptStream;
+  DecryptionContext : TGmKryptStream;
 begin
-  DecodeStream := EnsureCryptoStream( TGmKryptDecodeStream, aStream );
+  DecryptionContext := WrapStreamChain( aStream );
 
   try
-    fKeySeed := DecodeStream.ReadGmInteger();
-    DecodeStream.SetState( fKeySeed, False );
-    fPrototype.LoadFromStream( DecodeStream );
+    fKeySeed := DecryptionContext.Source.ReadGmInteger();
+    DecryptionContext.SetState( fKeySeed, False );
+    fPrototype.LoadFromStream( DecryptionContext );
   finally
     aStream.Free();
   end;
@@ -1052,14 +1049,14 @@ end;
 
 procedure TGmExtPackage.WriteEntityGEX( aStream: TStream; aOptimize: Boolean );
 var
-  EncodeStream : TCustomGmKryptStream;
+  EncryptionContext : TGmKryptStream;
 begin
-  EncodeStream := EnsureCryptoStream( TGmKryptEncodeStream, aStream );
+  EncryptionContext := WrapStreamChain( aStream );
 
   try
-    EncodeStream.WriteGmInteger( fKeySeed );
-    EncodeStream.SetState( fKeySeed, False );
-    fPrototype.SaveToStream( EncodeStream, aOptimize );
+    EncryptionContext.Source.WriteGmInteger( fKeySeed );
+    EncryptionContext.SetState( fKeySeed, False );
+    fPrototype.SaveToStream( EncryptionContext, aOptimize );
   finally
     aStream.Free();
   end;
@@ -1173,14 +1170,14 @@ end;
 
 procedure TGmExtFileDAT.LoadFromStream( aStream: TStream );
 var
-  DecodeStream : TCustomGmKryptStream;
+  DecryptionContext : TGmKryptStream;
 begin
-  DecodeStream := EnsureCryptoStream( TGmKryptDecodeStream, aStream );
+  DecryptionContext := WrapStreamChain( aStream );
 
   try
-    fKeySeed := DecodeStream.ReadGmInteger();
-    DecodeStream.SetState( fKeySeed, False );
-    ReadStreams( DecodeStream );
+    fKeySeed := DecryptionContext.Source.ReadGmInteger();
+    DecryptionContext.SetState( fKeySeed, False );
+    ReadStreams( DecryptionContext );
   finally
     aStream.Free();
   end;  
@@ -1188,14 +1185,14 @@ end;
 
 procedure TGmExtFileDAT.SaveToStream( aStream: TStream; aZlibLevel: TCompressionLevel );
 var
-  EncodeStream : TCustomGmKryptStream;
+  EncryptionContext : TGmKryptStream;
 begin
-  EncodeStream := EnsureCryptoStream( TGmKryptEncodeStream, aStream );
+  EncryptionContext := WrapStreamChain( aStream );
 
   try
-    EncodeStream.WriteGmInteger( fKeySeed );
-    EncodeStream.SetState( fKeySeed, False );
-    WriteStreams( EncodeStream, aZlibLevel );
+    EncryptionContext.Source.WriteGmInteger( fKeySeed );
+    EncryptionContext.SetState( fKeySeed, False );
+    WriteStreams( EncryptionContext, aZlibLevel );
   finally
     aStream.Free();
   end;
@@ -1221,17 +1218,17 @@ procedure TGmExtFileGEX.LoadFromStream( aStream: TStream;
   cbStreamBuilder: TGmExtStreamBuilderProc );
 var
   SignatureValue : LongInt;
-  DecodeStream : TCustomGmKryptStream;
+  DecryptionContext : TGmKryptStream;
   ContentFileName : String;
   iContent : TGmExtContent;
 begin
-  SignatureValue := aStream.ReadGmInteger();
-  CommonAssert( SignatureValue = cGmExtSignatureGEX,
-    Format( 'Invalid package signature (%d)', [SignatureValue] ) );
-  DecodeStream := EnsureCryptoStream( TGmKryptDecodeStream, aStream );
+  DecryptionContext := WrapStreamChain( aStream );
 
   try
-    fPackage.LoadFromStream( DecodeStream );
+    SignatureValue := DecryptionContext.Source.ReadGmInteger();
+    CommonAssert( SignatureValue = cGmExtSignatureGEX,
+      Format( 'Invalid package signature (%d)', [SignatureValue] ) );
+    fPackage.LoadFromStream( DecryptionContext );
 
     if Assigned( cbStreamBuilder ) then begin
       // The compressed data of a help file is stored in the beginning of the data block.
@@ -1257,7 +1254,7 @@ begin
       end;
     end;
 
-    ReadStreams( DecodeStream );
+    ReadStreams( DecryptionContext );
 
   finally
     aStream.Free();
@@ -1269,14 +1266,14 @@ end;
 procedure TGmExtFileGEX.SaveToStream( aStream: TStream; cbStreamBuilder: TGmExtStreamBuilderProc;
   aForceOptimize: Boolean; aZlibLevel: TCompressionLevel );
 var
-  EncodeStream : TCustomGmKryptStream;
+  EncryptionContext : TGmKryptStream;
   iContent : TGmExtContent;
 begin
-  aStream.WriteGmInteger( cGmExtSignatureGEX );
-  EncodeStream := EnsureCryptoStream( TGmKryptEncodeStream, aStream );
+  EncryptionContext := WrapStreamChain( aStream );
 
   try
-    fPackage.SaveToStream( EncodeStream, aForceOptimize );
+    EncryptionContext.Source.WriteGmInteger( cGmExtSignatureGEX );
+    fPackage.SaveToStream( EncryptionContext, aForceOptimize );
 
     if Assigned( cbStreamBuilder ) then begin
       if fPackage.Prototype.HelpFile <> '' then
@@ -1288,7 +1285,7 @@ begin
           cbStreamBuilder );
     end;
 
-    WriteStreams( EncodeStream, aZlibLevel );
+    WriteStreams( EncryptionContext, aZlibLevel );
 
   finally
     aStream.Free();

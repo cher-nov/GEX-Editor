@@ -29,12 +29,13 @@ const
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 type
 
-  TGmKryptCipherTable = array[Byte] of Byte;
+  TGmKryptSwapTable = array[Byte] of Byte;
   TGmKryptStreamClass = class of TCustomGmKryptStream;
 
   TCustomGmKryptStream = class( TOwnerStream )
   strict protected
-    fCipherTable : TGmKryptCipherTable;
+    fEncodeTable : TGmKryptSwapTable;
+    fDecodeTable : TGmKryptSwapTable;
     fBasePosition : Int64;
     fKeySeed : LongInt;
     fAdditiveCipher : Boolean;
@@ -44,21 +45,17 @@ type
   public
     procedure AfterConstruction(); override;
     function SetState( aKeySeed: LongInt; aAdditiveCipher: Boolean ): Boolean; virtual;
-    function IsIdenticalCipher(): Boolean; inline;
+    function IsIdenticalState(): Boolean; inline;
     function Seek( const Offset: Int64; Origin: TSeekOrigin ): Int64; override;
+    function Read( var Buffer; Count: LongInt ): LongInt; override;
+    function Write( const Buffer; Count: LongInt ): LongInt; override;
     property KeySeed: LongInt read fKeySeed;
     property AdditiveCipher: Boolean read fAdditiveCipher;
   end;
 
-  TGmKryptEncodeStream = class( TCustomGmKryptStream )
-  public
-    function Write( const Buffer; Count: LongInt ): LongInt; override;
-  end;
-
-  TGmKryptDecodeStream = class( TCustomGmKryptStream )
-  public
-    function SetState( aKeySeed: LongInt; aAdditiveCipher: Boolean ): Boolean; override;
-    function Read( var Buffer; Count: LongInt ): LongInt; override;
+  TGmKryptStream = class( TCustomGmKryptStream )
+    // This class is provided to use it for ownership and context sharing. If you want to
+    // use crypto stream just as a regular data source, use TCustomGmKryptStream instead.
   end;
 
 function GmKryptRandomKeySeed(): LongInt;
@@ -93,24 +90,27 @@ begin
   fKeySeed := aKeySeed;
   fAdditiveCipher := aAdditiveCipher;
 
-  Result := IsIdenticalCipher();
+  Result := IsIdenticalState();
   if Result then exit;
 
   for i in Byte do
-    fCipherTable[i] := i;
+    fEncodeTable[i] := i;
 
   a := (aKeySeed mod 250) + 6;
   b := aKeySeed div 250;
 
   for i := 1 to 10000 do begin
     j := ( (i*a+b) mod 254 ) + 1;
-    swap := fCipherTable[j];
-    fCipherTable[j] := fCipherTable[j+1];
-    fCipherTable[j+1] := swap;
+    swap := fEncodeTable[j];
+    fEncodeTable[j] := fEncodeTable[j+1];
+    fEncodeTable[j+1] := swap;
   end;
+
+  for i in Byte do
+    fDecodeTable[ fEncodeTable[i] ] := i;
 end;
 
-function TCustomGmKryptStream.IsIdenticalCipher(): Boolean;
+function TCustomGmKryptStream.IsIdenticalState(): Boolean;
 begin
   Result := (fKeySeed - cGmKryptIdentityKeySeed) mod 250 = 0;  // check for identity keys
   Result := Result and not fAdditiveCipher;  // check for non-identity method
@@ -120,7 +120,7 @@ function TCustomGmKryptStream.Seek( const Offset: Int64; Origin: TSeekOrigin ): 
 var
   BaseShift : Int64;
 begin
-  if not IsIdenticalCipher() then begin
+  if not IsIdenticalState() then begin
     case Word(Origin) of
       soFromBeginning:
         BaseShift := 0;
@@ -137,27 +137,37 @@ begin
   Result := fSource.Seek( Offset, Origin );
 end;
 
-function TCustomGmKryptStream.GetPosition(): Int64;
+function TCustomGmKryptStream.Read( var Buffer; Count: LongInt ): LongInt;
+var
+  TargetData : PByte;
+  code : Byte;
+  i : LongInt;
 begin
-  Result := fSource.Position - fBasePosition;
+  Result := fSource.Read( Buffer, Count );
+  if IsIdenticalState() then exit;
+
+  // skip first byte as required
+  if GetPosition() = Result then
+    i := 1
+  else
+    i := 0;
+
+  TargetData := PByte(@Buffer);
+  for i := i to Result-1 do begin
+    code := fDecodeTable[ TargetData[i] ];
+    if fAdditiveCipher then
+      code := SizeInt(code - GetPosition() - i) and 255;
+    TargetData[i] := code;
+  end;
 end;
 
-function TCustomGmKryptStream.GetSize(): Int64;
-begin
-  Result := fSource.Size - fBasePosition;
-end;
-
-////////////////////////////////////////////////////////////////////////////////////////////////////
-// TGmKryptEncodeStream
-////////////////////////////////////////////////////////////////////////////////////////////////////
-
-function TGmKryptEncodeStream.Write( const Buffer; Count: LongInt ): LongInt;
+function TCustomGmKryptStream.Write( const Buffer; Count: LongInt ): LongInt;
 var
   SourceData, OutputData : PByte;
   code : Byte;
   i : LongInt;
 begin
-  if IsIdenticalCipher() then begin
+  if IsIdenticalState() then begin
     SourceData := nil;
     OutputData := @Buffer;
   end else begin
@@ -175,7 +185,7 @@ begin
       code := SourceData[i];
       if fAdditiveCipher then
         code := SizeInt(code + GetPosition() + i) and 255;
-      SourceData[i] := fCipherTable[code];
+      SourceData[i] := fEncodeTable[code];
     end;
   end;
 
@@ -186,45 +196,14 @@ begin
   end;
 end;
 
-////////////////////////////////////////////////////////////////////////////////////////////////////
-// TGmKryptDecodeStream
-////////////////////////////////////////////////////////////////////////////////////////////////////
-
-function TGmKryptDecodeStream.SetState( aKeySeed: LongInt; aAdditiveCipher: Boolean ): Boolean;
-var
-  DecodeTable : TGmKryptCipherTable;
-  i : Integer;
+function TCustomGmKryptStream.GetPosition(): Int64;
 begin
-  Result := inherited;
-  if Result then exit;
-
-  for i in Byte do
-    DecodeTable[ fCipherTable[i] ] := i;
-  fCipherTable := DecodeTable;
+  Result := fSource.Position - fBasePosition;
 end;
 
-function TGmKryptDecodeStream.Read( var Buffer; Count: LongInt ): LongInt;
-var
-  TargetData : PByte;
-  code : Byte;
-  i : LongInt;
+function TCustomGmKryptStream.GetSize(): Int64;
 begin
-  Result := fSource.Read( Buffer, Count );
-  if IsIdenticalCipher() then exit;
-
-  // skip first byte as required
-  if GetPosition() = Result then
-    i := 1
-  else
-    i := 0;
-
-  TargetData := PByte(@Buffer);
-  for i := i to Result-1 do begin
-    code := fCipherTable[ TargetData[i] ];
-    if fAdditiveCipher then
-      code := SizeInt(code - GetPosition() - i) and 255;
-    TargetData[i] := code;
-  end;
+  Result := fSource.Size - fBasePosition;
 end;
 
 end.
